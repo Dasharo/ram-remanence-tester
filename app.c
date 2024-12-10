@@ -276,6 +276,8 @@ static VOID ExcludeOneEntry (UINTN I)
 
 static UINTN Differences = 0;
 static UINTN Compared = 0;
+static UINTN OneToZero[64];
+static UINTN ZeroToOne[64];
 
 static VOID CompareOneEntry (UINTN I)
 {
@@ -285,12 +287,16 @@ static VOID CompareOneEntry (UINTN I)
 		for (UINTN Q = 0; Q < PAGE_SIZE/sizeof(UINT64); Q++) {
 			UINTN Expected = Pattern();
 
-			Compared++;
+			Compared += 64;
 			if (*Ptr != Expected) {
-				// TODO: per-bit statistics
-				Print(L"Different value @ %llx, got %llx, expected %llx\n",
-				      (UINTN)Ptr, *Ptr, Expected);
-				Differences++;
+				Expected ^= *Ptr;
+				for (UINTN I = 0; I < 64; I++) {
+					if ((Expected >> I) & 1) {
+						ZeroToOne[I] +=  ((*Ptr >> I) & 1);
+						OneToZero[I] += !((*Ptr >> I) & 1);
+						Differences++;
+					}
+				}
 			}
 			Ptr++;
 		}
@@ -373,8 +379,13 @@ efi_main (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 		                           0, 0, NULL);
 		Assert (Status == EFI_SUCCESS);
 		Print(L"\nPattern comparison done\n");
-		Print(L"%lld/%lld different (%lld%%)\n", Differences, Compared,
+		Print(L"%lld/%lld different bits (%lld%%)\n", Differences, Compared,
 		      (Differences * 100) / Compared);
+		Print(L"\nPer bit:\n");
+		for (UINTN I = 0; I < 64; I++) {
+			Print(L"%2d: %16lld 0to1, %16lld 1to0, %16lld total\n", I,
+			      ZeroToOne[I], OneToZero[I], ZeroToOne[I] + OneToZero[I]);
+		}
 	}
 
 	/* Make sure data is actually written to RAM. */
