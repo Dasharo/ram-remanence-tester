@@ -12,7 +12,7 @@ EFI_LDS	= $(EFILIB)/elf_$(ARCH)_efi.lds
 
 CFLAGS		= -g -ffreestanding -fno-stack-protector -fno-stack-check \
                   -fpic -fshort-wchar -mno-red-zone -Wall $(EFIINCS) \
-                  -DEFI_FUNCTION_WRAPPER -DGNU_EFI_USE_MS_ABI
+                  -DEFI_FUNCTION_WRAPPER -DGNU_EFI_USE_MS_ABI -O2
 LDFLAGS = -nostdlib -znocombreloc -T $(EFI_LDS) -shared \
           -Bsymbolic -L $(EFILIB) $(EFI_CRT_OBJS)
 

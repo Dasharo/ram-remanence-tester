@@ -285,16 +285,19 @@ static VOID CompareOneEntry (UINTN I)
 		UINT64 *Ptr = (UINT64 *)(Mmap[I].PhysicalStart + P * PAGE_SIZE);
 		StirPattern((UINTN)Ptr);
 		for (UINTN Q = 0; Q < PAGE_SIZE/sizeof(UINT64); Q++) {
-			UINTN Expected = Pattern();
+			UINT64 Expected = Pattern();
 
 			Compared += 64;
 			if (*Ptr != Expected) {
 				Expected ^= *Ptr;
-				for (UINTN I = 0; I < 64; I++) {
-					if ((Expected >> I) & 1) {
-						ZeroToOne[I] +=  ((*Ptr >> I) & 1);
-						OneToZero[I] += !((*Ptr >> I) & 1);
-						Differences++;
+				for (UINT64 I = 0; I < 64; I++) {
+					UINT64 Tmp = 1ULL << I;
+					if (Expected & Tmp) {
+						if (*Ptr & Tmp) {
+							ZeroToOne[I]++;
+						} else {
+							OneToZero[I]++;
+						}
 					}
 				}
 			}
@@ -379,13 +382,17 @@ efi_main (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 		                           0, 0, NULL);
 		Assert (Status == EFI_SUCCESS);
 		Print(L"\nPattern comparison done\n");
-		Print(L"%lld/%lld different bits (%lld%%)\n", Differences, Compared,
-		      (Differences * 100) / Compared);
-		Print(L"\nPer bit:\n");
+
+		Print(L"\nPer bit differences:\n");
 		for (UINTN I = 0; I < 64; I++) {
+			Differences += ZeroToOne[I] + OneToZero[I];
 			Print(L"%2d: %16lld 0to1, %16lld 1to0, %16lld total\n", I,
 			      ZeroToOne[I], OneToZero[I], ZeroToOne[I] + OneToZero[I]);
 		}
+
+		Print(L"\n%lld/%lld different bits (%2lld.%02.2lld%%)\n", Differences,
+		      Compared, (Differences * 100) / Compared,
+		      ((Differences * 10000) / Compared) % 100);
 	}
 
 	/* Make sure data is actually written to RAM. */
@@ -396,8 +403,19 @@ efi_main (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 	TotalPages = 0;
 	InitMemmap();
 
-	Print(L"\nPress any key to reboot\n");
+	Print(L"\nPress R to reboot, S to shutdown\n");
 	WaitForSingleEvent(ST->ConIn->WaitForKey, 0);
+	uefi_call_wrapper(ST->ConIn->ReadKeyStroke, 2, ST->ConIn, &Key);
+
+	while (Key.UnicodeChar != L'r' && Key.UnicodeChar != L's') {
+		WaitForSingleEvent(ST->ConIn->WaitForKey, 0);
+		uefi_call_wrapper(ST->ConIn->ReadKeyStroke, 2, ST->ConIn, &Key);
+	}
+
+	if (Key.UnicodeChar == L's')
+		Status = uefi_call_wrapper(gRT->ResetSystem, 4, EfiResetShutdown, EFI_SUCCESS,
+		                           0, NULL);
+
 	Status = uefi_call_wrapper(gRT->ResetSystem, 4, EfiResetWarm, EFI_SUCCESS,
 	                           0, NULL);
 
