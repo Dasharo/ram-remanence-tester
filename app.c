@@ -34,7 +34,7 @@ static UINT64 Pattern (VOID)
 	return lfsr;
 }
 
-static VOID StirPattern (UINTN Seed)
+static VOID StirPattern (UINT64 Seed)
 {
 	/* Random mask, breaks the pattern and makes at least one bit set. */
 	lfsr = Seed ^ 0x7DEF56A18BC1A1E5ULL;
@@ -141,7 +141,7 @@ static VOID WriteOneEntry (UINTN I)
 {
 	for (UINTN P = 0; P < Mmap[I].NumberOfPages; P++) {
 		UINT64 *Ptr = (UINT64 *)(Mmap[I].PhysicalStart + P * PAGE_SIZE);
-		StirPattern((UINTN)Ptr);
+		StirPattern((UINT64)Ptr);
 		for (UINTN Q = 0; Q < PAGE_SIZE/sizeof(UINT64); Q++) {
 			*Ptr = Pattern();
 			Ptr++;
@@ -152,7 +152,7 @@ static VOID WriteOneEntry (UINTN I)
 	}
 }
 
-static VOID ExcludeRange (UINTN I, UINTN Base, UINTN NumPages)
+static VOID ExcludeRange (UINTN I, UINT64 Base, UINT64 NumPages)
 {
 	/*
 	 * There are 4 cases, sorted by increasing complexity:
@@ -235,17 +235,17 @@ static VOID ExcludeRange (UINTN I, UINTN Base, UINTN NumPages)
 static VOID ExcludeOneEntry (UINTN I)
 {
 	BOOLEAN WasSame = TRUE;
-	UINTN First = (UINTN)-1, Last = 0;
+	UINT64 First = (UINT64)-1, Last = 0;
 	UINT64 *Ptr;
 	for (UINTN P = 0; P < Mmap[I].NumberOfPages; P++) {
 		Ptr = (UINT64 *)(Mmap[I].PhysicalStart + P * PAGE_SIZE);
-		StirPattern((UINTN)Ptr);
+		StirPattern((UINT64)Ptr);
 		for (UINTN Q = 0; Q < PAGE_SIZE/sizeof(UINT64); Q++) {
-			UINTN Expected = Pattern();
+			UINT64 Expected = Pattern();
 
 			if (*Ptr != Expected) {
 				if (WasSame == TRUE || (P == 0 && Q == 0)) {
-					First = (UINTN)Ptr;
+					First = (UINT64)Ptr & ~(UINT64)(PAGE_SIZE - 1);
 				}
 				WasSame = FALSE;
 			} else {
@@ -255,11 +255,11 @@ static VOID ExcludeOneEntry (UINTN I)
 					 * the same as expected. This makes it easier to convert to
 					 * number of pages.
 					 */
-					Last = (UINTN)Ptr + PAGE_SIZE - 1;
-					Last &= ~(UINTN)(PAGE_SIZE - 1);
+					Last = (UINT64)Ptr + PAGE_SIZE - 1;
+					Last &= ~(UINT64)(PAGE_SIZE - 1);
 
 					ExcludeRange (I, First, (Last - First) / PAGE_SIZE);
-					First = (UINTN)-1;
+					First = (UINT64)-1;
 					Last = 0;
 				}
 				WasSame = TRUE;
@@ -269,25 +269,23 @@ static VOID ExcludeOneEntry (UINTN I)
 		PagesDone++;
 		Print(L"\r... %3.3d%%", (PagesDone * 100)/TotalPages);
 	}
-	if (First != (UINTN)-1) {
-		ExcludeRange (I, First, ((UINTN)Ptr - First) / PAGE_SIZE);
+	if (First != (UINT64)-1) {
+		ExcludeRange (I, First, ((UINT64)Ptr - First) / PAGE_SIZE);
 	}
 }
 
-static UINTN Differences = 0;
-static UINTN Compared = 0;
-static UINTN OneToZero[64];
-static UINTN ZeroToOne[64];
+static UINT64 Differences = 0;
+static UINT64 Compared = 0;
+static UINT64 OneToZero[64];
+static UINT64 ZeroToOne[64];
 
 static VOID CompareOneEntry (UINTN I)
 {
 	for (UINTN P = 0; P < Mmap[I].NumberOfPages; P++) {
 		UINT64 *Ptr = (UINT64 *)(Mmap[I].PhysicalStart + P * PAGE_SIZE);
-		StirPattern((UINTN)Ptr);
+		StirPattern((UINT64)Ptr);
 		for (UINTN Q = 0; Q < PAGE_SIZE/sizeof(UINT64); Q++) {
 			UINT64 Expected = Pattern();
-
-			Compared += 64;
 			if (*Ptr != Expected) {
 				Expected ^= *Ptr;
 				for (UINT64 I = 0; I < 64; I++) {
@@ -306,6 +304,8 @@ static VOID CompareOneEntry (UINTN I)
 		PagesDone++;
 		Print(L"\r... %3.3d%%", (PagesDone * 100)/TotalPages);
 	}
+
+	Compared += Mmap[I].NumberOfPages * PAGE_SIZE * 8;
 }
 
 EFI_STATUS
