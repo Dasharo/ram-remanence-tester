@@ -154,6 +154,7 @@ static VOID WriteOneEntry (UINTN I)
 
 static VOID ExcludeRange (UINTN I, UINT64 Base, UINT64 NumPages)
 {
+	Print(L"\nExcluding range @ %llx, %llx pages\n", Base, NumPages);
 	/*
 	 * There are 4 cases, sorted by increasing complexity:
 	 * 1. Excluded range is at the end of an entry. Decrease entry's
@@ -308,8 +309,104 @@ static VOID CompareOneEntry (UINTN I)
 	Compared += Mmap[I].NumberOfPages * PAGE_SIZE * 8;
 }
 
+static VOID GetFileName(CHAR16 *Name)
+{
+	EFI_TIME Time;
+
+	uefi_call_wrapper(gRT->GetTime, 2, &Time, NULL);
+
+	UnicodeSPrint(Name, 0, L"%04d_%02d_%02d_%02d_%02d.csv",
+	              Time.Year, Time.Month, Time.Day,
+	              Time.Hour, Time.Minute);
+}
+
+static VOID CreateResultFile(EFI_HANDLE ImageHandle, EFI_FILE_PROTOCOL **Csv)
+{
+	EFI_LOADED_IMAGE *Loaded = NULL;
+	EFI_FILE_PROTOCOL *Root = NULL;
+	EFI_SIMPLE_FILE_SYSTEM_PROTOCOL *SimpleFs = NULL;
+	CHAR16 Name[25];
+	EFI_STATUS Status;
+	CHAR8 Header[] = "Bit, 0to1, 1to0\n";
+	UINTN Len = sizeof(Header) - 1;
+
+	Status = uefi_call_wrapper(gBS->HandleProtocol, 3, ImageHandle,
+	                           &LoadedImageProtocol, (VOID **)&Loaded);
+	Assert(Status == EFI_SUCCESS);
+	Assert(Loaded != NULL);
+
+	Status = uefi_call_wrapper(gBS->HandleProtocol, 3, Loaded->DeviceHandle,
+	                           &gEfiSimpleFileSystemProtocolGuid,
+	                           (VOID **)&SimpleFs);
+	Assert(SimpleFs != NULL);
+
+	Status = uefi_call_wrapper(SimpleFs->OpenVolume, 2, SimpleFs, &Root);
+	Assert(Root != NULL);
+
+	GetFileName(Name);
+
+	Status = uefi_call_wrapper(Root->Open, 5, Root, Csv, Name,
+	                           EFI_FILE_MODE_CREATE | EFI_FILE_MODE_WRITE |
+	                           EFI_FILE_MODE_READ, 0);
+	Assert(*Csv != NULL);
+
+	Status = uefi_call_wrapper((*Csv)->Write, 3, *Csv, &Len, Header);
+	Assert(Status == EFI_SUCCESS);
+}
+
+static VOID AddResultLine(EFI_FILE_PROTOCOL *Csv, UINT64 Bit,
+                          UINT64 ZerosToOnes, UINT64 OnesToZeros)
+{
+	/*
+	 * UINT64 has up to 20 digits in decimal. Bit will always have up to 2
+	 * digits, but better safe than sorry.
+	 */
+	CHAR8 Str[70];
+	CHAR16 LStr[70];
+	UINTN Len;
+	EFI_STATUS Status;
+
+	Len = UnicodeSPrint(LStr, 70, L"%lld, %lld, %lld\n", Bit, ZerosToOnes,
+	                    OnesToZeros);
+
+	/* Always ASCII, so taking every other byte works. */
+	for (UINTN I = 0; I < Len; I++)
+		Str[I] = (CHAR8)LStr[I];
+
+	Str[Len] = 0;
+
+	Status = uefi_call_wrapper(Csv->Write, 3, Csv, &Len, Str);
+	Assert(Status == EFI_SUCCESS);
+}
+
+static VOID FinalizeResults(EFI_FILE_PROTOCOL *Csv)
+{
+	CHAR8 Footer[] = "\n\nDifferent bits, Total compared bits\n";
+	CHAR8 Str[50];
+	CHAR16 LStr[50];
+	UINTN Len = sizeof(Footer) - 1;
+	EFI_STATUS Status;
+
+	Status = uefi_call_wrapper(Csv->Write, 3, Csv, &Len, Footer);
+	Assert(Status == EFI_SUCCESS);
+
+	Len = UnicodeSPrint(LStr, 50, L"%lld, %lld\n", Differences, Compared);
+
+	/* Always ASCII, so taking every other byte works. */
+	for (UINTN I = 0; I < Len; I++)
+		Str[I] = (CHAR8)LStr[I];
+
+	Str[Len] = 0;
+
+	Status = uefi_call_wrapper(Csv->Write, 3, Csv, &Len, Str);
+	Assert(Status == EFI_SUCCESS);
+
+	Status = uefi_call_wrapper(Csv->Close, 1, Csv);
+	Assert(Status == EFI_SUCCESS);
+}
+
+/* No EFIAPI here. Not sure why, but gnu-efi converts this to SysV */
 EFI_STATUS
-EFIAPI
 efi_main (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 {
 	EFI_STATUS Status = EFI_SUCCESS;
@@ -365,6 +462,7 @@ efi_main (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 		Assert (Status == EFI_SUCCESS);
 		Print(L"\nExclude modified by firmware done\n");
 	} else if (Key.UnicodeChar == L'3') {
+		EFI_FILE_PROTOCOL *Csv = NULL;
 		Print(L"Pattern compare was selected\n");
 		VarSize = sizeof(Mmap);
 		Status = uefi_call_wrapper(gRT->GetVariable, 5, VarName, &VarGuid,
@@ -383,16 +481,24 @@ efi_main (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 		Assert (Status == EFI_SUCCESS);
 		Print(L"\nPattern comparison done\n");
 
+		/*
+		 * We no longer care about memory map or preservation of memory. Safe
+		 * to use firmware services again at this point.
+		 */
+		CreateResultFile(ImageHandle, &Csv);
+
 		Print(L"\nPer bit differences:\n");
 		for (UINTN I = 0; I < 64; I++) {
 			Differences += ZeroToOne[I] + OneToZero[I];
 			Print(L"%2d: %16lld 0to1, %16lld 1to0, %16lld total\n", I,
 			      ZeroToOne[I], OneToZero[I], ZeroToOne[I] + OneToZero[I]);
+			AddResultLine(Csv, I, ZeroToOne[I], OneToZero[I]);
 		}
 
 		Print(L"\n%lld/%lld different bits (%2lld.%02.2lld%%)\n", Differences,
 		      Compared, (Differences * 100) / Compared,
 		      ((Differences * 10000) / Compared) % 100);
+		FinalizeResults(Csv);
 	}
 
 	/* Make sure data is actually written to RAM. */

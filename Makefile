@@ -6,7 +6,7 @@ TARGET	:= BOOTx64.EFI
 EFIINC	:= /usr/include/efi
 EFILIB	:= /usr/lib
 
-EFIINCS	= -I$(EFIINC) -I$(EFIINC)/$(ARCH)
+EFIINCS	= -I$(EFIINC) -I$(EFIINC)/$(ARCH) -I$(EFIINC)/protocol
 EFI_CRT_OBJS	= $(EFILIB)/crt0-efi-$(ARCH).o
 EFI_LDS	= $(EFILIB)/elf_$(ARCH)_efi.lds
 
