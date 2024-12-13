@@ -509,7 +509,7 @@ efi_main (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 	TotalPages = 0;
 	InitMemmap();
 
-	Print(L"\nPress R to reboot, S to shutdown\n");
+	Print(L"\nPress R to reboot, S to shut down\n");
 	WaitForSingleEvent(ST->ConIn->WaitForKey, 0);
 	uefi_call_wrapper(ST->ConIn->ReadKeyStroke, 2, ST->ConIn, &Key);
 
