@@ -178,3 +178,13 @@ This application asserts on first sight of trouble. Some of most common issues:
 - `Status == EFI_SUCCESS`: this check is so generic that exact line number must
   be compared, check in the code what is done before that. One of the usual
   suspects is running steps out of order.
+
+## References
+
+- [Report from initial testing](https://blog.3mdeb.com/2024/2024-12-13-ram-data-decay-research/)
+
+## Credits
+
+This research has been supported by Power Up Privacy, a privacy advocacy group
+that seeks to supercharge privacy projects with resources so they can complete
+their mission of making our world a better place.
