@@ -379,28 +379,113 @@ static VOID AddResultLine(EFI_FILE_PROTOCOL *Csv, UINT64 Bit,
 	Assert(Status == EFI_SUCCESS);
 }
 
+static SMBIOS_STRUCTURE_POINTER GetNextSmbiosStruct (
+  SMBIOS3_STRUCTURE_TABLE *Smbios,
+  SMBIOS_STRUCTURE_POINTER Ptr
+  )
+{
+	/* Skip formatted area */
+	Ptr.Raw += Ptr.Hdr->Length;
+	if ((UINT64)Ptr.Raw >= Smbios->TableAddress + Smbios->TableMaximumSize) {
+		Ptr.Raw = NULL;
+		return Ptr;
+	}
+
+	/* Find end of strings marker */
+	while (*Ptr.Raw != '\0' || *(Ptr.Raw + 1) != '\0')
+		Ptr.Raw++;
+
+	/* Skip end of strings marker */
+	Ptr.Raw += 2;
+
+	if ((UINT64)Ptr.Raw >= Smbios->TableAddress + Smbios->TableMaximumSize) {
+		Ptr.Raw = NULL;
+		return Ptr;
+	}
+
+	return Ptr;
+}
+
+static CHAR8 *GetProductName(VOID)
+{
+	SMBIOS3_STRUCTURE_TABLE *SmbiosTable = NULL;
+	SMBIOS_STRUCTURE_POINTER Ptr;
+
+	LibGetSystemConfigurationTable (&SMBIOS3TableGuid, (VOID **)&SmbiosTable);
+	Ptr.Raw = (UINT8 *)SmbiosTable->TableAddress;
+
+	while (Ptr.Raw != NULL && Ptr.Hdr->Type != 1)
+		Ptr = GetNextSmbiosStruct(SmbiosTable, Ptr);
+
+	if (Ptr.Raw == NULL || Ptr.Type1->ProductName == 0)
+		return "unknown";
+
+	return LibGetSmbiosString (&Ptr, Ptr.Type1->ProductName);
+}
+
+static VOID Char16toChar8(CHAR8 *Dst, CHAR16 *Src, UINTN Len)
+{
+	/* Assume always ASCII, so taking every other byte works. */
+	for (UINTN I = 0; I < Len; I++)
+		Dst[I] = (CHAR8)Src[I];
+
+	Dst[Len] = 0;
+}
+
 static VOID FinalizeResults(EFI_FILE_PROTOCOL *Csv)
 {
 	CHAR8 Footer[] = "\n\nDifferent bits, Total compared bits\n";
-	CHAR8 Str[50];
-	CHAR16 LStr[50];
+	CHAR8 Str[100];
+	CHAR16 LStr[100];
+	CHAR16 InStr[10];
 	UINTN Len = sizeof(Footer) - 1;
 	EFI_STATUS Status;
+	SMBIOS3_STRUCTURE_TABLE *SmbiosTable = NULL;
 
+	/* Footer */
 	Status = uefi_call_wrapper(Csv->Write, 3, Csv, &Len, Footer);
 	Assert(Status == EFI_SUCCESS);
 
-	Len = UnicodeSPrint(LStr, 50, L"%lld, %lld\n", Differences, Compared);
-
-	/* Always ASCII, so taking every other byte works. */
-	for (UINTN I = 0; I < Len; I++)
-		Str[I] = (CHAR8)LStr[I];
-
-	Str[Len] = 0;
+	/* Statistics */
+	Len = UnicodeSPrint(LStr, 100, L"%lld, %lld\n", Differences, Compared);
+	Char16toChar8(Str, LStr, Len);
 
 	Status = uefi_call_wrapper(Csv->Write, 3, Csv, &Len, Str);
 	Assert(Status == EFI_SUCCESS);
 
+	/* Pad with few empty rows, reusing footer */
+	Len = 2;
+	Status = uefi_call_wrapper(Csv->Write, 3, Csv, &Len, Footer);
+	Assert(Status == EFI_SUCCESS);
+
+	/* Platform product name */
+	Status = LibGetSystemConfigurationTable (&SMBIOS3TableGuid,
+	                                         (VOID **)&SmbiosTable);
+	Len = UnicodeSPrint(LStr, 100, L"ProductName, \"%a\"\n", GetProductName());
+	Char16toChar8(Str, LStr, Len);
+
+	Status = uefi_call_wrapper(Csv->Write, 3, Csv, &Len, Str);
+	Assert(Status == EFI_SUCCESS);
+
+	/* Prompt and save temperature */
+	Input(L"Ambient temperature: ", InStr, 10);
+	Print(L"\n");
+	Len = UnicodeSPrint(LStr, 100, L"Temperature, \"%s\"\n", InStr);
+	Char16toChar8(Str, LStr, Len);
+
+	Status = uefi_call_wrapper(Csv->Write, 3, Csv, &Len, Str);
+	Assert(Status == EFI_SUCCESS);
+
+	/* Prompt and save power-off time */
+	Input(L"Time (in seconds) without power: ", InStr, 10);
+	Print(L"\n");
+	Len = UnicodeSPrint(LStr, 100, L"Time, \"%s\"\n", InStr);
+	Char16toChar8(Str, LStr, Len);
+
+	Status = uefi_call_wrapper(Csv->Write, 3, Csv, &Len, Str);
+	Assert(Status == EFI_SUCCESS);
+
+	/* Close the file, which flushes it to disk */
 	Status = uefi_call_wrapper(Csv->Close, 1, Csv);
 	Assert(Status == EFI_SUCCESS);
 }
