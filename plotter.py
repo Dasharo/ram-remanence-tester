@@ -3,6 +3,7 @@
 import csv
 import os
 import sys
+import tempfile
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.ticker import FuncFormatter
@@ -10,12 +11,12 @@ from odf.opendocument import OpenDocumentSpreadsheet
 from odf.table import Table, TableRow, TableCell
 from odf.text import P
 from odf.draw import Frame, Image
-from odf.style import Style, GraphicProperties
+from odf.manifest import FileEntry
 
 
-def generate_bar_chart(output_folder, data, file_stem):
+def generate_bar_chart(data, temp_dir, file_stem):
     """
-    Create a bar chart based on the provided data.
+    Create a bar chart based on the provided data and save it temporarily.
     """
     bits = [int(row[0]) for row in data]
     values_0to1 = [int(row[1]) for row in data]
@@ -55,11 +56,11 @@ def generate_bar_chart(output_folder, data, file_stem):
 
     plt.tight_layout()
 
-    # Save the plot to a file
-    plot_path = os.path.join(output_folder, f"{file_stem}.png")
-    plt.savefig(plot_path)
+    # Save the plot to a temporary file
+    chart_path = os.path.join(temp_dir, f"{file_stem}.png")
+    plt.savefig(chart_path)
     plt.close()
-    print(f"Bar chart saved to: {plot_path}")
+    return chart_path
 
 
 def write_to_ods(ods_doc, sheet_name, data, chart_path):
@@ -77,16 +78,19 @@ def write_to_ods(ods_doc, sheet_name, data, chart_path):
             table_row.addElement(table_cell)
         table.addElement(table_row)
 
+    # Add the table to the spreadsheet
+    ods_doc.spreadsheet.addElement(table)
+
     # Embed the chart as an image in a new row
     if os.path.exists(chart_path):
-        # Add a new row for the chart
+        # Add the image to the ODS package
+        relative_path = ods_doc.addPicture(chart_path)
+
+        # Create a new row for the chart
         image_row = TableRow()
 
         # Create a cell to contain the image frame
         image_cell = TableCell()
-
-        # Add the image to the ODS package
-        relative_path = ods_doc.addPicture(chart_path)
 
         # Create a frame to hold the image
         frame = Frame(width="15cm", height="10cm", x="0cm", y="0cm")
@@ -99,14 +103,11 @@ def write_to_ods(ods_doc, sheet_name, data, chart_path):
         # Add the cell with the frame to the row
         image_row.addElement(image_cell)
 
-        # Add the row to the table
+        # Add the row with the image to the table
         table.addElement(image_row)
 
-    # Add the table to the spreadsheet
-    ods_doc.spreadsheet.addElement(table)
 
-
-def process_csv(input_csv, ods_doc, output_folder):
+def process_csv(input_csv, ods_doc, temp_dir):
     file_stem = os.path.splitext(os.path.basename(input_csv))[0]  # File name without extension
 
     # Read and process the CSV file
@@ -156,8 +157,7 @@ def process_csv(input_csv, ods_doc, output_folder):
     numeric_data = [row for row in processed_rows if len(row) >= 4 and row[0].isdigit()]
 
     # Generate the bar chart
-    chart_path = os.path.join(output_folder, f"{file_stem}.png")
-    generate_bar_chart(output_folder, numeric_data, file_stem)
+    chart_path = generate_bar_chart(numeric_data, temp_dir, file_stem)
 
     # Add processed data and chart to ODS file
     write_to_ods(ods_doc, file_stem, processed_rows, chart_path)
@@ -170,24 +170,24 @@ def main():
 
     input_folder = sys.argv[1]
 
-    # Prepare output folder
-    output_folder = "plotter_output"
-    os.makedirs(output_folder, exist_ok=True)
+    # Prepare a temporary directory for charts
+    with tempfile.TemporaryDirectory() as temp_dir:
+        # Create an ODS file
+        output_folder = "plotter_output"
+        os.makedirs(output_folder, exist_ok=True)
+        ods_file_path = os.path.join(output_folder, "processed_data.ods")
+        ods_doc = OpenDocumentSpreadsheet()
 
-    # Create an ODS file
-    ods_file_path = os.path.join(output_folder, "processed_data.ods")
-    ods_doc = OpenDocumentSpreadsheet()
+        # Process all CSV files in the input folder
+        for file_name in os.listdir(input_folder):
+            input_path = os.path.join(input_folder, file_name)
+            if os.path.isfile(input_path) and file_name.endswith(".csv"):
+                print(f"Processing: {input_path}")
+                process_csv(input_path, ods_doc, temp_dir)
 
-    # Process all CSV files in the input folder
-    for file_name in os.listdir(input_folder):
-        input_path = os.path.join(input_folder, file_name)
-        if os.path.isfile(input_path) and file_name.endswith(".csv"):
-            print(f"Processing: {input_path}")
-            process_csv(input_path, ods_doc, output_folder)
-
-    # Save the ODS file
-    ods_doc.save(ods_file_path)
-    print(f"All processed data saved to: {ods_file_path}")
+        # Save the ODS file
+        ods_doc.save(ods_file_path)
+        print(f"All processed data saved to: {ods_file_path}")
 
 
 if __name__ == "__main__":
