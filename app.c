@@ -1,6 +1,57 @@
 #include <efi.h>
 #include <efilib.h>
 
+/* As defined per SMBIOS 2.3, we don't care about further fields */
+#pragma pack(1)
+typedef struct {
+	SMBIOS_HEADER   Hdr;
+	UINT16          PhysicalMemoryArrayHandle;
+	UINT16          MemoryErrorInformationHandle;
+	UINT16          TotalWidth;
+	UINT16          DataWidth;
+	UINT16          Size;
+	UINT8           FormFactor;
+	UINT8           DeviceSet;
+	SMBIOS_STRING   DeviceLocator;
+	SMBIOS_STRING   BankLocator;
+	UINT8           MemoryType;
+	UINT16          TypeDetail;
+	UINT16          Speed;
+	SMBIOS_STRING   Manufacturer;
+	SMBIOS_STRING   SerialNumber;
+	SMBIOS_STRING   AssetTag;
+	SMBIOS_STRING   PartNumber;
+} SMBIOS_TYPE17;
+#pragma pack()
+
+/* This isn't part of gnu-efi, and AsciiVSPrint doesn't handle '\n' properly. */
+static UINTN AsciiSPrint (
+	OUT CHAR8         *Str,
+	IN UINTN          StrSize,
+	IN CONST CHAR8    *fmt,
+	...
+	)
+{
+	va_list       args;
+	UINTN         len;
+	va_start (args, fmt);
+	len = AsciiVSPrint(Str, StrSize, fmt, args);
+	va_end (args);
+
+	/*
+	 * Every '\n' is changed to '\r\r\n' by AsciiVSPrint. Code below fixes the
+	 * trailing one, but internal or multiple newline characters aren't handled.
+	 */
+	if (len >= 3 &&
+	    Str[len-3] == '\r' && Str[len-2] == '\r' && Str[len-1] == '\n') {
+		Str[len-3] = '\n';
+		Str[len-2] = '\0';
+		len -= 2;
+	}
+
+	return len;
+}
+
 #define PAGE_SIZE 0x1000
 #define ADDR_4G 0x100000000ULL
 #define ADDR_16M 0x1000000ULL
@@ -362,18 +413,11 @@ static VOID AddResultLine(EFI_FILE_PROTOCOL *Csv, UINT64 Bit,
 	 * digits, but better safe than sorry.
 	 */
 	CHAR8 Str[70];
-	CHAR16 LStr[70];
 	UINTN Len;
 	EFI_STATUS Status;
 
-	Len = UnicodeSPrint(LStr, 70, L"%lld, %lld, %lld\n", Bit, ZerosToOnes,
-	                    OnesToZeros);
-
-	/* Always ASCII, so taking every other byte works. */
-	for (UINTN I = 0; I < Len; I++)
-		Str[I] = (CHAR8)LStr[I];
-
-	Str[Len] = 0;
+	Len = AsciiSPrint(Str, 70, "%lld, %lld, %lld\n", Bit, ZerosToOnes,
+	                  OnesToZeros);
 
 	Status = uefi_call_wrapper(Csv->Write, 3, Csv, &Len, Str);
 	Assert(Status == EFI_SUCCESS);
@@ -423,13 +467,67 @@ static CHAR8 *GetProductName(VOID)
 	return LibGetSmbiosString (&Ptr, Ptr.Type1->ProductName);
 }
 
-static VOID Char16toChar8(CHAR8 *Dst, CHAR16 *Src, UINTN Len)
+static CHAR8 *SmbiosString(SMBIOS_STRUCTURE_POINTER *Ptr, UINT16 Num)
 {
-	/* Assume always ASCII, so taking every other byte works. */
-	for (UINTN I = 0; I < Len; I++)
-		Dst[I] = (CHAR8)Src[I];
+	CHAR8 *Ret;
 
-	Dst[Len] = 0;
+	if (Ptr == NULL || Num == 0)
+		return "unknown";
+
+	Ret = LibGetSmbiosString(Ptr, Num);
+	if (Ret != NULL)
+		return Ret;
+
+	return "unknown";
+}
+
+static VOID StoreDimmsInfo(EFI_FILE_PROTOCOL *Csv)
+{
+	CHAR8 Header[] = "\n\nDIMM info\nLocator, Bank Locator, Part Number\n";
+	CHAR8 Str[200];
+	UINTN Len = sizeof(Header) - 1;
+	SMBIOS3_STRUCTURE_TABLE *SmbiosTable = NULL;
+	SMBIOS_STRUCTURE_POINTER Ptr;
+	SMBIOS_TYPE17 *T17;
+	EFI_STATUS Status;
+
+	LibGetSystemConfigurationTable (&SMBIOS3TableGuid, (VOID **)&SmbiosTable);
+	Ptr.Raw = (UINT8 *)SmbiosTable->TableAddress;
+
+	Status = uefi_call_wrapper(Csv->Write, 3, Csv, &Len, Header);
+	Assert(Status == EFI_SUCCESS);
+
+	while (TRUE) {
+		if (Ptr.Raw == NULL) break;
+		if (Ptr.Hdr->Type != 17) {
+			Ptr = GetNextSmbiosStruct(SmbiosTable, Ptr);
+			continue;
+		}
+
+		/*
+		 * According to SMBIOS specification, one such table should be created
+		 * per DIMM slot, regardless of whether the slot is currently populated
+		 * or not. What coreboot does is a different story. Code in 'lib' is
+		 * ready to produce descriptions for empty slots, but 'soc/intel' skips
+		 * unpopulated slots as if they didn't exist.
+		 */
+		T17 = (SMBIOS_TYPE17 *)Ptr.Raw;
+		Len = AsciiSPrint (Str, sizeof(Str), "\"%a\", \"%a\", \"%a\"\n",
+		                   SmbiosString(&Ptr, T17->DeviceLocator),
+		                   SmbiosString(&Ptr, T17->BankLocator),
+		                   SmbiosString(&Ptr, T17->PartNumber)
+		                  );
+
+		Status = uefi_call_wrapper(Csv->Write, 3, Csv, &Len, Str);
+		Assert(Status == EFI_SUCCESS);
+
+		Ptr = GetNextSmbiosStruct(SmbiosTable, Ptr);
+	}
+
+	/* Empty line */
+	Len = 1;
+	Status = uefi_call_wrapper(Csv->Write, 3, Csv, &Len, Header);
+	Assert(Status == EFI_SUCCESS);
 }
 
 static VOID FinalizeResults(EFI_FILE_PROTOCOL *Csv)
@@ -440,15 +538,13 @@ static VOID FinalizeResults(EFI_FILE_PROTOCOL *Csv)
 	CHAR16 InStr[10];
 	UINTN Len = sizeof(Footer) - 1;
 	EFI_STATUS Status;
-	SMBIOS3_STRUCTURE_TABLE *SmbiosTable = NULL;
 
 	/* Footer */
 	Status = uefi_call_wrapper(Csv->Write, 3, Csv, &Len, Footer);
 	Assert(Status == EFI_SUCCESS);
 
 	/* Statistics */
-	Len = UnicodeSPrint(LStr, 100, L"%lld, %lld\n", Differences, Compared);
-	Char16toChar8(Str, LStr, Len);
+	Len = AsciiSPrint(Str, 100, "%lld, %lld\n", Differences, Compared);
 
 	Status = uefi_call_wrapper(Csv->Write, 3, Csv, &Len, Str);
 	Assert(Status == EFI_SUCCESS);
@@ -459,28 +555,48 @@ static VOID FinalizeResults(EFI_FILE_PROTOCOL *Csv)
 	Assert(Status == EFI_SUCCESS);
 
 	/* Platform product name */
-	Status = LibGetSystemConfigurationTable (&SMBIOS3TableGuid,
-	                                         (VOID **)&SmbiosTable);
-	Len = UnicodeSPrint(LStr, 100, L"ProductName, \"%a\"\n", GetProductName());
-	Char16toChar8(Str, LStr, Len);
+	Len = AsciiSPrint(Str, 100, "ProductName, \"%a\"\n", GetProductName());
 
 	Status = uefi_call_wrapper(Csv->Write, 3, Csv, &Len, Str);
 	Assert(Status == EFI_SUCCESS);
 
+	/* Store information about populated memory */
+	StoreDimmsInfo(Csv);
+
+	/* Flush before allowing users to do something unexpected */
+	Status = uefi_call_wrapper(Csv->Flush, 1, Csv);
+	Assert(Status == EFI_SUCCESS);
+
+	Print(L"%H");
 	/* Prompt and save temperature */
 	Input(L"Ambient temperature: ", InStr, 10);
 	Print(L"\n");
-	Len = UnicodeSPrint(LStr, 100, L"Temperature, \"%s\"\n", InStr);
-	Char16toChar8(Str, LStr, Len);
+	Len = AsciiSPrint(Str, 100, "Temperature, \"%s\"\n", InStr);
 
 	Status = uefi_call_wrapper(Csv->Write, 3, Csv, &Len, Str);
+	Assert(Status == EFI_SUCCESS);
+
+	/* Flush before allowing users to do something unexpected */
+	Status = uefi_call_wrapper(Csv->Flush, 1, Csv);
 	Assert(Status == EFI_SUCCESS);
 
 	/* Prompt and save power-off time */
 	Input(L"Time (in seconds) without power: ", InStr, 10);
 	Print(L"\n");
-	Len = UnicodeSPrint(LStr, 100, L"Time, \"%s\"\n", InStr);
-	Char16toChar8(Str, LStr, Len);
+	Len = AsciiSPrint(Str, 100, "Time, \"%s\"\n", InStr);
+
+	Status = uefi_call_wrapper(Csv->Write, 3, Csv, &Len, Str);
+	Assert(Status == EFI_SUCCESS);
+
+	/* Flush before allowing users to do something unexpected */
+	Status = uefi_call_wrapper(Csv->Flush, 1, Csv);
+	Assert(Status == EFI_SUCCESS);
+
+	/* Prompt for other comments, 96 + 2 * '"' + '\n' + '\0' = 100 */
+	Input(L"Comments (max 96 characters, leave empty to skip): ", LStr, 96);
+	Print(L"\n");
+	Len = AsciiSPrint(Str, 100, "\"%s\"\n", LStr);
+	Print(L"%N");
 
 	Status = uefi_call_wrapper(Csv->Write, 3, Csv, &Len, Str);
 	Assert(Status == EFI_SUCCESS);
@@ -517,9 +633,9 @@ efi_main (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 	InitMemmap();
 
 	Print(L"\n\nChoose the mode:\n");
-	Print(L"1. Pattern write\n");
-	Print(L"2. Exclude modified by firmware\n");
-	Print(L"3. Pattern compare\n\n");
+	Print(L"%H1%N. Pattern write\n");
+	Print(L"%H2%N. Exclude modified by firmware\n");
+	Print(L"%H3%N. Pattern compare\n\n");
 
 	WaitForSingleEvent(ST->ConIn->WaitForKey, 0);
 	uefi_call_wrapper(ST->ConIn->ReadKeyStroke, 2, ST->ConIn, &Key);
@@ -580,8 +696,8 @@ efi_main (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 			AddResultLine(Csv, I, ZeroToOne[I], OneToZero[I]);
 		}
 
-		Print(L"\n%lld/%lld different bits (%2lld.%02.2lld%%)\n", Differences,
-		      Compared, (Differences * 100) / Compared,
+		Print(L"\n%lld/%lld different bits (%E%2lld.%02.2lld%%%N)\n",
+		      Differences, Compared, (Differences * 100) / Compared,
 		      ((Differences * 10000) / Compared) % 100);
 		FinalizeResults(Csv);
 	}
@@ -594,7 +710,7 @@ efi_main (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 	TotalPages = 0;
 	InitMemmap();
 
-	Print(L"\nPress R to reboot, S to shut down\n");
+	Print(L"\nPress %HR%N to reboot, %HS%N to shut down\n");
 	WaitForSingleEvent(ST->ConIn->WaitForKey, 0);
 	uefi_call_wrapper(ST->ConIn->ReadKeyStroke, 2, ST->ConIn, &Key);
 
