@@ -416,7 +416,7 @@ static VOID AddResultLine(EFI_FILE_PROTOCOL *Csv, UINT64 Bit,
 	UINTN Len;
 	EFI_STATUS Status;
 
-	Len = AsciiSPrint(Str, 70, "%lld, %lld, %lld\n", Bit, ZerosToOnes,
+	Len = AsciiSPrint(Str, 70, "%lld,%lld,%lld\n", Bit, ZerosToOnes,
 	                  OnesToZeros);
 
 	Status = uefi_call_wrapper(Csv->Write, 3, Csv, &Len, Str);
@@ -512,7 +512,7 @@ static VOID StoreDimmsInfo(EFI_FILE_PROTOCOL *Csv)
 		 * unpopulated slots as if they didn't exist.
 		 */
 		T17 = (SMBIOS_TYPE17 *)Ptr.Raw;
-		Len = AsciiSPrint (Str, sizeof(Str), "\"%a\", \"%a\", \"%a\"\n",
+		Len = AsciiSPrint (Str, sizeof(Str), "\"%a\",\"%a\",\"%a\"\n",
 		                   SmbiosString(&Ptr, T17->DeviceLocator),
 		                   SmbiosString(&Ptr, T17->BankLocator),
 		                   SmbiosString(&Ptr, T17->PartNumber)
@@ -544,7 +544,7 @@ static VOID FinalizeResults(EFI_FILE_PROTOCOL *Csv)
 	Assert(Status == EFI_SUCCESS);
 
 	/* Statistics */
-	Len = AsciiSPrint(Str, 100, "%lld, %lld\n", Differences, Compared);
+	Len = AsciiSPrint(Str, 100, "%lld,%lld\n", Differences, Compared);
 
 	Status = uefi_call_wrapper(Csv->Write, 3, Csv, &Len, Str);
 	Assert(Status == EFI_SUCCESS);
@@ -555,7 +555,7 @@ static VOID FinalizeResults(EFI_FILE_PROTOCOL *Csv)
 	Assert(Status == EFI_SUCCESS);
 
 	/* Platform product name */
-	Len = AsciiSPrint(Str, 100, "ProductName, \"%a\"\n", GetProductName());
+	Len = AsciiSPrint(Str, 100, "ProductName,\"%a\"\n", GetProductName());
 
 	Status = uefi_call_wrapper(Csv->Write, 3, Csv, &Len, Str);
 	Assert(Status == EFI_SUCCESS);
@@ -571,7 +571,7 @@ static VOID FinalizeResults(EFI_FILE_PROTOCOL *Csv)
 	/* Prompt and save temperature */
 	Input(L"Ambient temperature: ", InStr, 10);
 	Print(L"\n");
-	Len = AsciiSPrint(Str, 100, "Temperature, \"%s\"\n", InStr);
+	Len = AsciiSPrint(Str, 100, "Temperature,\"%s\"\n", InStr);
 
 	Status = uefi_call_wrapper(Csv->Write, 3, Csv, &Len, Str);
 	Assert(Status == EFI_SUCCESS);
@@ -583,7 +583,7 @@ static VOID FinalizeResults(EFI_FILE_PROTOCOL *Csv)
 	/* Prompt and save power-off time */
 	Input(L"Time (in seconds) without power: ", InStr, 10);
 	Print(L"\n");
-	Len = AsciiSPrint(Str, 100, "Time, \"%s\"\n", InStr);
+	Len = AsciiSPrint(Str, 100, "Time,\"%s\"\n", InStr);
 
 	Status = uefi_call_wrapper(Csv->Write, 3, Csv, &Len, Str);
 	Assert(Status == EFI_SUCCESS);
