@@ -24,7 +24,40 @@ typedef struct {
 } SMBIOS_TYPE17;
 #pragma pack()
 
-/* This isn't part of gnu-efi, and AsciiVSPrint doesn't handle '\n' properly. */
+/* https://github.com/ncroxon/gnu-efi/issues/63 */
+static UINTN AsciiVSPrint_fixed (
+    OUT CHAR8         *Str,
+    IN UINTN          StrSize,
+    IN CONST CHAR8    *fmt,
+    va_list           args
+)
+{
+	CHAR16 *UnicodeStr, *UnicodeFmt;
+	UINTN i, Len;
+
+	UnicodeStr = AllocatePool(StrSize * sizeof(CHAR16));
+	if (!UnicodeStr)
+		return 0;
+
+	UnicodeFmt = PoolPrint(L"%a", fmt);
+	if (!UnicodeFmt) {
+		FreePool(UnicodeStr);
+		return 0;
+	}
+
+	Len = UnicodeVSPrint(UnicodeStr, StrSize * sizeof(CHAR16), UnicodeFmt, args);
+	FreePool(UnicodeFmt);
+
+	// The strings are ASCII so just do a plain Unicode conversion
+	for (i = 0; i < Len; i++)
+		Str[i] = (CHAR8)UnicodeStr[i];
+	Str[Len] = 0;
+	FreePool(UnicodeStr);
+
+	return Len;
+}
+
+/* This isn't part of gnu-efi, and AsciiVSPrint has some issues. */
 static UINTN AsciiSPrint (
 	OUT CHAR8         *Str,
 	IN UINTN          StrSize,
@@ -35,12 +68,14 @@ static UINTN AsciiSPrint (
 	va_list       args;
 	UINTN         len;
 	va_start (args, fmt);
-	len = AsciiVSPrint(Str, StrSize, fmt, args);
+	len = AsciiVSPrint_fixed(Str, StrSize, fmt, args);
 	va_end (args);
 
 	/*
-	 * Every '\n' is changed to '\r\r\n' by AsciiVSPrint. Code below fixes the
-	 * trailing one, but internal or multiple newline characters aren't handled.
+	 * Every '\n' is changed to '\r\r\n' by AsciiVSPrint() - one '\r' is added
+	 * when converting format to Unicode with PoolPrint(), the other when
+	 * UnicodeVSPrint() is invoked. Code below fixes the trailing '\r\r\n', but
+	 * internal or multiple newline characters aren't handled.
 	 */
 	if (len >= 3 &&
 	    Str[len-3] == '\r' && Str[len-2] == '\r' && Str[len-1] == '\n') {
@@ -592,8 +627,12 @@ static VOID FinalizeResults(EFI_FILE_PROTOCOL *Csv)
 	Status = uefi_call_wrapper(Csv->Flush, 1, Csv);
 	Assert(Status == EFI_SUCCESS);
 
-	/* Prompt for other comments, 96 + 2 * '"' + '\n' + '\0' = 100 */
-	Input(L"Comments (max 96 characters, leave empty to skip): ", LStr, 96);
+	/*
+	 * Prompt for other comments.
+	 * 96 + 2 * '"' + '\n' +'\0' = 100
+	 * '\0' is included in parameter to Input() below, hence 96+1 = 97.
+	 */
+	Input(L"Comments (max 96 characters, leave empty to skip): ", LStr, 97);
 	Print(L"\n");
 	Len = AsciiSPrint(Str, 100, "\"%s\"\n", LStr);
 	Print(L"%N");
