@@ -17,12 +17,15 @@ import PIL.Image
 
 def generate_bar_chart(data, temp_dir, file_stem):
     """
-    Create a bar chart based on the provided data and save it temporarily.
+    Create a bar chart with a secondary Y-axis (percentage scale) on the right and save it temporarily.
     """
     bits = [int(row[0]) for row in data]
     values_0to1 = [int(row[1]) for row in data]
     values_1to0 = [int(row[2]) for row in data]
     averages = [float(row[3]) for row in data]
+
+    # Calculate the total memory as the sum of all bars
+    total_memory = sum(values_0to1) + sum(values_1to0)
 
     # Width of each group of bars
     bar_width = 0.2
@@ -31,34 +34,41 @@ def generate_bar_chart(data, temp_dir, file_stem):
     x_positions = np.arange(len(bits))
 
     # Dynamically adjust figure width based on number of bits
-    fig_width = max(10, len(bits) * 0.2)  # Minimum width of 10, grow with bits
-    fig, ax = plt.subplots(figsize=(fig_width, 8))  # Keep height consistent
+    fig_width = max(10, len(bits) * 0.2)
+    fig, ax1 = plt.subplots(figsize=(fig_width, 8))  # Keep height consistent
 
-    # Create the bar chart
-    ax.bar(x_positions - bar_width, values_0to1, bar_width, label="0to1")
-    ax.bar(x_positions, values_1to0, bar_width, label="1to0")
-    ax.bar(x_positions + bar_width, averages, bar_width, label="average")
+    # Create the bar chart on the primary axis
+    ax1.bar(x_positions - bar_width, values_0to1, bar_width, label="0to1", color="tab:blue")
+    ax1.bar(x_positions, values_1to0, bar_width, label="1to0", color="tab:orange")
+    ax1.bar(x_positions + bar_width, averages, bar_width, label="average", color="tab:green")
 
     # Add legend
-    ax.legend()
+    ax1.legend(loc="upper left")
 
-    # Format the vertical axis numbers to use plain notation
-    ax.yaxis.set_major_formatter(FuncFormatter(lambda x, _: f"{int(x):,}"))
+    # Format the primary vertical axis (absolute values)
+    ax1.set_ylabel("Absolute Value (bits switched)", fontsize=14, labelpad=10)
+    ax1.yaxis.set_major_formatter(FuncFormatter(lambda x, _: f"{int(x):,}"))
 
-    # Adjust x-axis limits to match the bar spacing
-    ax.set_xlim([-0.5, len(bits) - 0.5])
+    # Add labels and adjust tick label font sizes
+    ax1.set_xlabel("Bit number in data bus", fontsize=16, labelpad=10)
+    ax1.tick_params(axis='x', labelsize=10)
+    ax1.tick_params(axis='y', labelsize=10)
+
+    # Add a secondary Y-axis for percentage
+    ax2 = ax1.twinx()  # Create a secondary axis sharing the same x-axis
+    ax2.set_ylabel("Percentage of Total Memory", fontsize=14, labelpad=10)
+
+    # Calculate and set the percentage scale
+    ax2.set_ylim(0, 100)  # Percentage goes from 0 to 100%
+    ax2.yaxis.set_major_formatter(FuncFormatter(lambda x, _: f"{x:.0f}%"))
+    ax2.tick_params(axis='y', labelsize=10)
 
     # Replace default X-tick labels with the Bit values
-    ax.set_xticks(x_positions)
-    ax.set_xticklabels(bits, rotation=45, ha="right")
+    ax1.set_xticks(x_positions)
+    ax1.set_xticklabels(bits, rotation=45, ha="right")
 
-    # Add axes titles
-    ax.set_xlabel("Bit number in data bus", fontsize=16, labelpad=10)
-    ax.set_ylabel("Number of bits that switched their value", fontsize=16, labelpad=10)
-
-    # Adjust tick label font sizes for readability
-    ax.tick_params(axis='x', labelsize=10)
-    ax.tick_params(axis='y', labelsize=10)
+    # Adjust x-axis limits to match the bar spacing
+    ax1.set_xlim([-0.5, len(bits) - 0.5])
 
     # Use tight layout to prevent label clipping
     plt.tight_layout()
