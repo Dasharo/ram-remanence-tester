@@ -1,3 +1,4 @@
 matplotlib==3.8.0
 numpy==1.26.0
 odfpy==1.4.1
+pillow

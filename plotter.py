@@ -12,6 +12,7 @@ from odf.table import Table, TableRow, TableCell
 from odf.text import P
 from odf.draw import Frame, Image
 from odf.manifest import FileEntry
+import PIL.Image
 
 
 def generate_bar_chart(data, temp_dir, file_stem):
@@ -29,31 +30,37 @@ def generate_bar_chart(data, temp_dir, file_stem):
     # Position of the bars on the X axis
     x_positions = np.arange(len(bits))
 
-    # Create the bar chart
-    plt.figure(figsize=(12, 8))
-    plt.bar(x_positions - bar_width, values_0to1, bar_width, label="0to1")
-    plt.bar(x_positions, values_1to0, bar_width, label="1to0")
-    plt.bar(x_positions + bar_width, averages, bar_width, label="average")
+    # Dynamically adjust figure width based on number of bits
+    fig_width = max(10, len(bits) * 0.2)  # Minimum width of 10, grow with bits
+    fig, ax = plt.subplots(figsize=(fig_width, 8))  # Keep height consistent
 
-    # Add legend only
-    plt.legend()
+    # Create the bar chart
+    ax.bar(x_positions - bar_width, values_0to1, bar_width, label="0to1")
+    ax.bar(x_positions, values_1to0, bar_width, label="1to0")
+    ax.bar(x_positions + bar_width, averages, bar_width, label="average")
+
+    # Add legend
+    ax.legend()
 
     # Format the vertical axis numbers to use plain notation
-    def plain_formatter(x, pos):
-        return f"{int(x):,}"  # Adds thousands separator
-    plt.gca().yaxis.set_major_formatter(FuncFormatter(plain_formatter))
+    ax.yaxis.set_major_formatter(FuncFormatter(lambda x, _: f"{int(x):,}"))
 
-    # Remove extra margins on the X-axis
-    plt.gca().set_xlim([-0.5, len(bits) - 0.5])  # Align bars exactly with edges
+    # Adjust x-axis limits to match the bar spacing
+    ax.set_xlim([-0.5, len(bits) - 0.5])
 
     # Replace default X-tick labels with the Bit values
-    plt.xticks(x_positions, bits, rotation=45)
+    ax.set_xticks(x_positions)
+    ax.set_xticklabels(bits, rotation=45, ha="right")
 
-    # Remove titles from the chart and axes
-    plt.xlabel("")
-    plt.ylabel("")
-    plt.title("")
+    # Add axes titles
+    ax.set_xlabel("Bit number in data bus", fontsize=16, labelpad=10)
+    ax.set_ylabel("Number of bits that switched their value", fontsize=16, labelpad=10)
 
+    # Adjust tick label font sizes for readability
+    ax.tick_params(axis='x', labelsize=10)
+    ax.tick_params(axis='y', labelsize=10)
+
+    # Use tight layout to prevent label clipping
     plt.tight_layout()
 
     # Save the plot to a temporary file
@@ -62,10 +69,10 @@ def generate_bar_chart(data, temp_dir, file_stem):
     plt.close()
     return chart_path
 
-
 def write_to_ods(ods_doc, sheet_name, data, chart_path):
     """
-    Add a sheet to the ODS file with the given data and embed the chart.
+    Add a sheet to the ODS file with the given data and embed the chart at the top in a new column.
+    The chart is resized to 80% of its original size while preserving the aspect ratio.
     """
     table = Table(name=sheet_name)
 
@@ -78,33 +85,44 @@ def write_to_ods(ods_doc, sheet_name, data, chart_path):
             table_row.addElement(table_cell)
         table.addElement(table_row)
 
-    # Add the table to the spreadsheet
-    ods_doc.spreadsheet.addElement(table)
-
-    # Embed the chart as an image in a new row
+    # Embed the chart as an image in the top row, new column
     if os.path.exists(chart_path):
         # Add the image to the ODS package
         relative_path = ods_doc.addPicture(chart_path)
 
-        # Create a new row for the chart
-        image_row = TableRow()
+        # Get the original dimensions of the image
+        import PIL.Image
+        with PIL.Image.open(chart_path) as img:
+            img_width, img_height = img.size
 
-        # Create a cell to contain the image frame
-        image_cell = TableCell()
+        # Scale the image to 80% of its original size
+        scale_factor = 0.7
+        scaled_width_cm = (img_width * scale_factor) / 96 * 2.54  # Convert pixels to cm
+        scaled_height_cm = (img_height * scale_factor) / 96 * 2.54  # Convert pixels to cm
 
-        # Create a frame to hold the image
-        frame = Frame(width="15cm", height="10cm", x="0cm", y="0cm")
+        # Create a frame to hold the image with scaled dimensions
+        frame = Frame(
+            width=f"{scaled_width_cm:.2f}cm",
+            height=f"{scaled_height_cm:.2f}cm",
+            x="0cm",
+            y="0cm",
+        )
         image = Image(href=relative_path, type="simple")
         frame.addElement(image)
 
-        # Add the frame to the cell
-        image_cell.addElement(frame)
+        # Add the image in the first row, next to the data
+        chart_row = table.firstChild  # Get the first row of the table
+        if not chart_row:
+            chart_row = TableRow()
+            table.addElement(chart_row)
 
-        # Add the cell with the frame to the row
-        image_row.addElement(image_cell)
+        # Create a new cell in the first row for the chart
+        chart_cell = TableCell()
+        chart_cell.addElement(frame)
+        chart_row.addElement(chart_cell)
 
-        # Add the row with the image to the table
-        table.addElement(image_row)
+    # Add the table to the spreadsheet
+    ods_doc.spreadsheet.addElement(table)
 
 
 def process_csv(input_csv, ods_doc, temp_dir):
@@ -145,7 +163,7 @@ def process_csv(input_csv, ods_doc, temp_dir):
             avg_val = (val_0to1 + val_1to0) / 2.0
 
             # Append the average to the row
-            row.append(f"{avg_val:.2f}")
+            row.append(f"{avg_val:.1f}")
         except (ValueError, IndexError):
             # If parsing fails, keep the row unchanged
             pass
@@ -173,9 +191,7 @@ def main():
     # Prepare a temporary directory for charts
     with tempfile.TemporaryDirectory() as temp_dir:
         # Create an ODS file
-        output_folder = "plotter_output"
-        os.makedirs(output_folder, exist_ok=True)
-        ods_file_path = os.path.join(output_folder, "processed_data.ods")
+        ods_file_path = os.path.join(input_folder, "processed_data.ods")
         ods_doc = OpenDocumentSpreadsheet()
 
         # Process all CSV files in the input folder
