@@ -2,7 +2,6 @@
 
 import csv
 import os
-import sys
 import argparse
 import tempfile
 import matplotlib.pyplot as plt
@@ -12,12 +11,11 @@ from odf.opendocument import OpenDocumentSpreadsheet
 from odf.table import Table, TableRow, TableCell
 from odf.text import P
 from odf.draw import Frame, Image
-from odf.manifest import FileEntry
 import PIL.Image
 
 
 
-def generate_bar_chart(data, temp_dir, file_stem, save_pngs, output_folder):
+def generate_bar_chart(data, temp_dir, file_stem, save_pngs, output_folder, total_bits):
     """
     Create a bar chart with a secondary Y-axis (percentage scale) on the right.
     Save it temporarily and optionally save as a standalone .png file in output_folder/chart_pngs/.
@@ -26,11 +24,6 @@ def generate_bar_chart(data, temp_dir, file_stem, save_pngs, output_folder):
     values_0to1 = [int(row[1]) for row in data]
     values_1to0 = [int(row[2]) for row in data]
     averages = [float(row[3]) for row in data]
-
-    # Calculate total bits for percentage
-    total_bits = sum(values_0to1) + sum(values_1to0)
-    if total_bits == 0:
-        total_bits = 1
 
     # Width of each group of bars
     bar_width = 0.2
@@ -68,7 +61,6 @@ def generate_bar_chart(data, temp_dir, file_stem, save_pngs, output_folder):
 
     # Optionally save a separate PNG
     if save_pngs:
-        # Create a subfolder for the chart PNGs
         png_output_folder = os.path.join(output_folder, "chart_pngs")
         os.makedirs(png_output_folder, exist_ok=True)
         png_output_path = os.path.join(png_output_folder, f"{file_stem}.png")
@@ -100,7 +92,6 @@ def write_to_ods(ods_doc, sheet_name, data, chart_path):
         relative_path = ods_doc.addPicture(chart_path)
 
         # Get the original dimensions of the image
-        import PIL.Image
         with PIL.Image.open(chart_path) as img:
             img_width, img_height = img.size
 
@@ -135,12 +126,58 @@ def write_to_ods(ods_doc, sheet_name, data, chart_path):
 
 
 def process_csv(input_csv, ods_doc, temp_dir, save_pngs, output_folder):
-    file_stem = os.path.splitext(os.path.basename(input_csv))[0]  # File name without extension
+    file_stem = os.path.splitext(os.path.basename(input_csv))[0]  # Default file name without extension
 
     # Read and process the CSV file
     with open(input_csv, 'r', encoding='utf-8') as f_in:
         reader = csv.reader(f_in, delimiter=',')
         rows = list(reader)
+
+    # Extract metadata: ProductName, Temperature, Time
+    product_name = None
+    temperature = None
+    time = None
+
+    for row in rows:
+        if len(row) > 1:
+            if row[0].strip() == "ProductName":
+                product_name = row[1].strip()
+            elif row[0].strip() == "Temperature":
+                try:
+                    temperature = float(row[1].strip())
+                except ValueError:
+                    temperature = None
+            elif row[0].strip() == "Time":
+                try:
+                    time = float(row[1].strip())
+                except ValueError:
+                    time = None
+
+    # Determine the sheet and PNG names
+    if product_name and temperature is not None and time is not None:
+        sheet_name = f"temp_{temperature}_time_{time}"
+    else:
+        sheet_name = file_stem
+
+    # Extract "Total compared bits" from the CSV
+    total_bits = None
+    for i, row in enumerate(rows):
+        if row and len(row) > 1 and row[1].strip() == "Total compared bits":
+            try:
+                # Extract the value from the second column of the next row
+                raw_value = rows[i + 1][1].strip()
+                # Remove leading ' if present and convert to int
+                total_bits = int(raw_value.lstrip("'"))
+                break
+            except (IndexError, ValueError):
+                print(f"Error: Invalid 'Total compared bits' value in {input_csv}")
+                total_bits = None
+                break
+
+    # Default to 1 if "Total compared bits" is missing or invalid
+    if total_bits is None or total_bits <= 0:
+        print(f"Warning: 'Total compared bits' not found or invalid in {input_csv}. Defaulting to 1.")
+        total_bits = 1
 
     # Processed rows to store in ODS
     processed_rows = []
@@ -183,12 +220,14 @@ def process_csv(input_csv, ods_doc, temp_dir, save_pngs, output_folder):
     # Extract numeric data (excluding the header)
     numeric_data = [row for row in processed_rows if len(row) >= 4 and row[0].isdigit()]
 
-    # Generate the bar chart
-    chart_path = generate_bar_chart(numeric_data, temp_dir, file_stem, save_pngs, output_folder)
+    # Generate the bar chart, passing total_bits
+    chart_path = generate_bar_chart(numeric_data, temp_dir, sheet_name, save_pngs, output_folder, total_bits)
 
     # Add processed data and chart to ODS file
-    write_to_ods(ods_doc, file_stem, processed_rows, chart_path)
+    write_to_ods(ods_doc, sheet_name, processed_rows, chart_path)
 
+    # Return product name, temperature, and time for ODS naming
+    return product_name, temperature, time
 
 def main():
     parser = argparse.ArgumentParser(description="Process CSV files and generate ODS file with optional PNGs.")
@@ -206,8 +245,11 @@ def main():
 
     # Prepare a temporary directory for charts
     with tempfile.TemporaryDirectory() as temp_dir:
+        # Placeholder for the ODS file name
+        ods_name = "processed_data"
+        product_name_found = False
+
         # Create an ODS file
-        ods_file_path = os.path.join(output_folder, "processed_data.ods")
         ods_doc = OpenDocumentSpreadsheet()
 
         # Process all CSV files in the input folder
@@ -215,9 +257,15 @@ def main():
             input_path = os.path.join(input_folder, file_name)
             if os.path.isfile(input_path) and file_name.endswith(".csv"):
                 print(f"Processing: {input_path}")
-                process_csv(input_path, ods_doc, temp_dir, save_pngs, output_folder)
+                product_name, temperature, time = process_csv(input_path, ods_doc, temp_dir, save_pngs, output_folder)
+
+                # Update ODS name if metadata is found
+                if product_name and not product_name_found:
+                    ods_name = product_name
+                    product_name_found = True
 
         # Save the ODS file
+        ods_file_path = os.path.join(output_folder, f"{ods_name}.ods")
         ods_doc.save(ods_file_path)
         print(f"All processed data saved to: {ods_file_path}")
 
