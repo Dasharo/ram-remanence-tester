@@ -3,6 +3,7 @@
 import csv
 import os
 import sys
+import argparse
 import tempfile
 import matplotlib.pyplot as plt
 import numpy as np
@@ -15,67 +16,65 @@ from odf.manifest import FileEntry
 import PIL.Image
 
 
-def generate_bar_chart(data, temp_dir, file_stem):
+
+def generate_bar_chart(data, temp_dir, file_stem, save_pngs, output_folder):
     """
-    Create a bar chart with a secondary Y-axis (percentage scale) on the right and save it temporarily.
+    Create a bar chart with a secondary Y-axis (percentage scale) on the right.
+    Save it temporarily and optionally save as a standalone .png file in output_folder/chart_pngs/.
     """
     bits = [int(row[0]) for row in data]
     values_0to1 = [int(row[1]) for row in data]
     values_1to0 = [int(row[2]) for row in data]
     averages = [float(row[3]) for row in data]
 
-    # Calculate the total memory as the sum of all bars
-    total_memory = sum(values_0to1) + sum(values_1to0)
+    # Calculate total bits for percentage
+    total_bits = sum(values_0to1) + sum(values_1to0)
+    if total_bits == 0:
+        total_bits = 1
 
     # Width of each group of bars
     bar_width = 0.2
-
-    # Position of the bars on the X axis
     x_positions = np.arange(len(bits))
-
-    # Dynamically adjust figure width based on number of bits
     fig_width = max(10, len(bits) * 0.2)
-    fig, ax1 = plt.subplots(figsize=(fig_width, 8))  # Keep height consistent
 
-    # Create the bar chart on the primary axis
+    fig, ax1 = plt.subplots(figsize=(fig_width, 8))
+
     ax1.bar(x_positions - bar_width, values_0to1, bar_width, label="0to1", color="tab:blue")
     ax1.bar(x_positions, values_1to0, bar_width, label="1to0", color="tab:orange")
     ax1.bar(x_positions + bar_width, averages, bar_width, label="average", color="tab:green")
 
-    # Add legend
     ax1.legend(loc="upper left")
-
-    # Format the primary vertical axis (absolute values)
     ax1.set_ylabel("Absolute Value (bits switched)", fontsize=14, labelpad=10)
     ax1.yaxis.set_major_formatter(FuncFormatter(lambda x, _: f"{int(x):,}"))
-
-    # Add labels and adjust tick label font sizes
     ax1.set_xlabel("Bit number in data bus", fontsize=16, labelpad=10)
     ax1.tick_params(axis='x', labelsize=10)
     ax1.tick_params(axis='y', labelsize=10)
 
-    # Add a secondary Y-axis for percentage
-    ax2 = ax1.twinx()  # Create a secondary axis sharing the same x-axis
+    ax2 = ax1.twinx()
     ax2.set_ylabel("Percentage of Total Memory", fontsize=14, labelpad=10)
-
-    # Calculate and set the percentage scale
-    ax2.set_ylim(0, 100)  # Percentage goes from 0 to 100%
+    ax2.set_ylim(0, 100)
     ax2.yaxis.set_major_formatter(FuncFormatter(lambda x, _: f"{x:.0f}%"))
     ax2.tick_params(axis='y', labelsize=10)
 
-    # Replace default X-tick labels with the Bit values
     ax1.set_xticks(x_positions)
     ax1.set_xticklabels(bits, rotation=45, ha="right")
-
-    # Adjust x-axis limits to match the bar spacing
     ax1.set_xlim([-0.5, len(bits) - 0.5])
 
-    # Use tight layout to prevent label clipping
     plt.tight_layout()
 
-    # Save the plot to a temporary file
+    # Save to a temporary file
     chart_path = os.path.join(temp_dir, f"{file_stem}.png")
     plt.savefig(chart_path)
+
+    # Optionally save a separate PNG
+    if save_pngs:
+        # Create a subfolder for the chart PNGs
+        png_output_folder = os.path.join(output_folder, "chart_pngs")
+        os.makedirs(png_output_folder, exist_ok=True)
+        png_output_path = os.path.join(png_output_folder, f"{file_stem}.png")
+        plt.savefig(png_output_path)
+        print(f"Standalone PNG saved to: {png_output_path}")
+
     plt.close()
     return chart_path
 
@@ -135,7 +134,7 @@ def write_to_ods(ods_doc, sheet_name, data, chart_path):
     ods_doc.spreadsheet.addElement(table)
 
 
-def process_csv(input_csv, ods_doc, temp_dir):
+def process_csv(input_csv, ods_doc, temp_dir, save_pngs, output_folder):
     file_stem = os.path.splitext(os.path.basename(input_csv))[0]  # File name without extension
 
     # Read and process the CSV file
@@ -185,23 +184,30 @@ def process_csv(input_csv, ods_doc, temp_dir):
     numeric_data = [row for row in processed_rows if len(row) >= 4 and row[0].isdigit()]
 
     # Generate the bar chart
-    chart_path = generate_bar_chart(numeric_data, temp_dir, file_stem)
+    chart_path = generate_bar_chart(numeric_data, temp_dir, file_stem, save_pngs, output_folder)
 
     # Add processed data and chart to ODS file
     write_to_ods(ods_doc, file_stem, processed_rows, chart_path)
 
 
 def main():
-    if len(sys.argv) < 2:
-        print("Usage: python plotter.py <folder_with_csvs>")
-        sys.exit(1)
+    parser = argparse.ArgumentParser(description="Process CSV files and generate ODS file with optional PNGs.")
+    parser.add_argument("input_folder", help="Folder containing the CSV files to process.")
+    parser.add_argument("--output-folder", required=True, help="Folder to save the ODS file and PNGs. Must be explicitly specified.")
+    parser.add_argument("--save-pngs", action="store_true", help="Save standalone PNG files in addition to embedding in ODS.")
+    args = parser.parse_args()
 
-    input_folder = sys.argv[1]
+    input_folder = args.input_folder
+    output_folder = args.output_folder
+    save_pngs = args.save_pngs
+
+    # Ensure the output folder exists
+    os.makedirs(output_folder, exist_ok=True)
 
     # Prepare a temporary directory for charts
     with tempfile.TemporaryDirectory() as temp_dir:
         # Create an ODS file
-        ods_file_path = os.path.join(input_folder, "processed_data.ods")
+        ods_file_path = os.path.join(output_folder, "processed_data.ods")
         ods_doc = OpenDocumentSpreadsheet()
 
         # Process all CSV files in the input folder
@@ -209,12 +215,11 @@ def main():
             input_path = os.path.join(input_folder, file_name)
             if os.path.isfile(input_path) and file_name.endswith(".csv"):
                 print(f"Processing: {input_path}")
-                process_csv(input_path, ods_doc, temp_dir)
+                process_csv(input_path, ods_doc, temp_dir, save_pngs, output_folder)
 
         # Save the ODS file
         ods_doc.save(ods_file_path)
         print(f"All processed data saved to: {ods_file_path}")
-
 
 if __name__ == "__main__":
     main()
