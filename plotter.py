@@ -155,7 +155,7 @@ def process_csv(input_csv, ods_doc, temp_dir, save_pngs, output_folder):
                 time = float(row[1].strip())
 
     if product_name and temperature is not None and time is not None:
-        sheet_name = f"temp_{temperature}_time_{time}"
+        sheet_name = f"{file_stem}_time_{time}_temp_{temperature}"
     else:
         sheet_name = file_stem
 
@@ -208,7 +208,7 @@ def main():
         product_name_found = False
 
         ods_doc = OpenDocumentSpreadsheet()
-        for file_name in os.listdir(input_folder):
+        for file_name in sorted(os.listdir(input_folder)):
             input_path = os.path.join(input_folder, file_name)
             if os.path.isfile(input_path) and file_name.endswith(".csv"):
                 product_name, temperature, time = process_csv(input_path, ods_doc, temp_dir, save_pngs, output_folder)
