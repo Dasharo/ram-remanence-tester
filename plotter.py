@@ -30,14 +30,14 @@ def generate_bar_chart(data, temp_dir, file_stem, save_pngs, output_folder, tota
 
     fig, ax1 = plt.subplots(figsize=(fig_width, 8))
 
-    ax1.bar(x_positions - bar_width, values_0to1, bar_width, label="0to1", color="tab:blue")
-    ax1.bar(x_positions, values_1to0, bar_width, label="1to0", color="tab:orange")
-    ax1.bar(x_positions + bar_width, averages, bar_width, label="average", color="tab:green")
+    ax1.bar(x_positions + 1.5 * bar_width, values_0to1, bar_width, label="0to1", color="tab:blue")
+    ax1.bar(x_positions + 2.5 * bar_width, values_1to0, bar_width, label="1to0", color="tab:orange")
+    ax1.bar(x_positions + 3.5 * bar_width, averages, bar_width, label="average", color="tab:green")
 
     ax1.legend(loc="upper left")
     ax1.set_ylabel("Absolute Value (bits switched)", fontsize=14, labelpad=10)
     ax1.yaxis.set_major_formatter(FuncFormatter(lambda x, _: f"{int(x):,}"))
-    ax1.set_xlabel("Bit number in data bus", fontsize=16, labelpad=10)
+    ax1.set_xlabel("Bit position on data bus", fontsize=16, labelpad=10)
     ax1.tick_params(axis='x', labelsize=10)
     ax1.tick_params(axis='y', labelsize=10)
 
@@ -53,10 +53,13 @@ def generate_bar_chart(data, temp_dir, file_stem, save_pngs, output_folder, tota
     else:
         ax2.yaxis.set_major_formatter(FuncFormatter(lambda x, _: f"{x:.2f}%"))
     ax2.tick_params(axis='y', labelsize=10)
+    ax2.grid(True)
 
     ax1.set_xticks(x_positions)
-    ax1.set_xticklabels(bits, rotation=45, ha="right")
-    ax1.set_xlim([-0.5, len(bits) - 0.5])
+    ax1.set_xticklabels(bits, rotation=-45, ha="left")
+    ax1.set_xlim([0, len(bits)])
+    ax1.set_xticks(ax1.get_xticks()[::8])
+    ax1.grid(True, axis='x')
 
     plt.tight_layout()
 
