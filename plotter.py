@@ -46,7 +46,12 @@ def generate_bar_chart(data, temp_dir, file_stem, save_pngs, output_folder, tota
 
     ax2.set_ylim(0, ax1.get_ylim()[1]/(total_bits/128) * 100) # 128, not 64, to include the average in calculations
 
-    ax2.yaxis.set_major_formatter(FuncFormatter(lambda x, _: f"{x:.0f}%"))
+    if ax2.get_ylim()[1] > 35:
+        ax2.yaxis.set_major_formatter(FuncFormatter(lambda x, _: f"{x:.0f}%"))
+    elif ax2.get_ylim()[1] > 10:
+        ax2.yaxis.set_major_formatter(FuncFormatter(lambda x, _: f"{x:.1f}%"))
+    else:
+        ax2.yaxis.set_major_formatter(FuncFormatter(lambda x, _: f"{x:.2f}%"))
     ax2.tick_params(axis='y', labelsize=10)
 
     ax1.set_xticks(x_positions)
