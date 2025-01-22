@@ -154,6 +154,16 @@ static VOID UpdateTotalPages(VOID)
 		TotalPages += Mmap[I].NumberOfPages;
 }
 
+static VOID ShowProgress (VOID)
+{
+	static INTN Prev = -1;
+	INTN Current = (PagesDone * 100)/TotalPages;
+	if (Current != Prev) {
+		Print(L"\r... %3.3d%%", Current);
+		Prev = Current;
+	}
+}
+
 static VOID InitMemmap (VOID)
 {
 	UINTN MMSize = sizeof(Mmap);
@@ -234,7 +244,7 @@ static VOID WriteOneEntry (UINTN I)
 		}
 
 		PagesDone++;
-		Print(L"\r... %3.3d%%", (PagesDone * 100)/TotalPages);
+		ShowProgress();
 	}
 }
 
@@ -354,7 +364,7 @@ static VOID ExcludeOneEntry (UINTN I)
 			Ptr++;
 		}
 		PagesDone++;
-		Print(L"\r... %3.3d%%", (PagesDone * 100)/TotalPages);
+		ShowProgress();
 	}
 	if (First != (UINT64)-1) {
 		ExcludeRange (I, First, ((UINT64)Ptr - First) / PAGE_SIZE);
@@ -389,7 +399,7 @@ static VOID CompareOneEntry (UINTN I)
 			Ptr++;
 		}
 		PagesDone++;
-		Print(L"\r... %3.3d%%", (PagesDone * 100)/TotalPages);
+		ShowProgress();
 	}
 
 	Compared += Mmap[I].NumberOfPages * PAGE_SIZE * 8;
