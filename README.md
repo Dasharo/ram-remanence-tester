@@ -120,9 +120,26 @@ second.
 This step will do the actual comparison of memory against expected pattern,
 taking the modified memory map from step 2 into account. The comparison is
 similar to that of previous step, except this time some per-bit statistics are
-saved for later analysis.
+saved for later analysis. It may take significantly longer to complete,
+especially for larger amount of flipped bits. After the test finishes, the
+application will show results and ask for few environmental factors, as well as
+an optional free-form comment to be added to the results:
 
-Results are saved in CSV file on USB drive. Current date and time is used as a
+```text
+62:         27046685 0to1,         27569254 1to0,         54615939 total
+63:         27137124 0to1,         26885265 1to0,         54022389 total
+
+3427191393/8724152320 different bits (39.28%)
+Ambient temperature: 18.2
+Time (in seconds) without power: 0
+Comments (max 96 characters, leave empty to skip): no bat, PSU connected, power button immediately, boot after ~1s
+```
+
+Don't worry about counting the characters to the limit, any character above that
+won't be echoed back. Apart from answers to those question, metadata describing
+platform name and DIMM part number coming from SMBIOS will be stored.
+
+Results are saved as CSV file on USB drive. Current date and time is used as a
 file name. The format of file:
 
 ```text
@@ -136,11 +153,19 @@ Bit, 0to1, 1to0
 
 Different bits, Total compared bits
 3427191393, 8724152320
-```
 
-The same results in (arguably) more human-readable form are printed on the
-screen. It also includes percentage of bits that changed their values, but it
-uses integer division to calculate it, to get real value, use values from CSV.
+
+ProductName,"NV4xPZ"
+
+
+DIMM info
+Locator, Bank Locator, Part Number
+"Channel-0-DIMM-0","BANK 0","78.D2GG7.4010B"
+
+Temperature,"18.2"
+Time,"0"
+"no bat, PSU connected, power button immediately, boot after ~1s"
+```
 
 Once again, the application will ask whether to reboot or shut down. This time
 use whatever suits you best, probably depending on whether further tests are to
@@ -230,6 +255,7 @@ python plotter.py <input_folder> --output-folder <output_folder> [--save-pngs]
 ## References
 
 - [Report from initial testing](https://blog.3mdeb.com/2024/2024-12-13-ram-data-decay-research/)
+- [Report from part 2 of research](https://blog.3mdeb.com/2025/2025-01-24-ram-data-decay-research-part2/)
 
 ## Credits
 
