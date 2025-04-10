@@ -149,41 +149,13 @@ static UINT64 Compared = 0;
 static UINT64 OneToZero[64];
 static UINT64 ZeroToOne[64];
 
-static VOID CompareOneEntry (UINTN I)
-{
-	for (UINTN P = 0; P < Mmap[I].NumberOfPages; P++) {
-		UINT64 *Ptr = (UINT64 *)(Mmap[I].PhysicalStart + P * PAGE_SIZE);
-		for (UINTN Q = 0; Q < PAGE_SIZE/sizeof(UINT64); Q++) {
-			UINT64 Expected = (UINT64)0;
-			if (*Ptr != Expected) {
-				Expected ^= *Ptr;
-				for (UINT64 I = 0; I < 64; I++) {
-					UINT64 Tmp = 1ULL << I;
-					if (Expected & Tmp) {
-						if (*Ptr & Tmp) {
-							ZeroToOne[I]++;
-						} else {
-							OneToZero[I]++;
-						}
-					}
-				}
-			}
-			Ptr++;
-		}
-		PagesDone++;
-		ShowProgress();
-	}
-
-	Compared += Mmap[I].NumberOfPages * PAGE_SIZE * 8;
-}
-
 static VOID GetFileName(CHAR16 *Name, UINT64 AddressStart, UINT64 AddressEnd)
 {
 	EFI_TIME Time;
 
 	uefi_call_wrapper(gRT->GetTime, 2, &Time, NULL);
 
-	UnicodeSPrint(Name, 0, L"%04d_%02d_%02d_%02d_%02d_0x%x-0x%x.csv",
+	UnicodeSPrint(Name, 0, L"%04d_%02d_%02d_%02d_%02d_0x%16llx-0x%16llx.csv",
 	              Time.Year, Time.Month, Time.Day,
 	              Time.Hour, Time.Minute, AddressStart, AddressEnd);
 }
