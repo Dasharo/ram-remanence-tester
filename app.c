@@ -4,9 +4,6 @@
 #define MAX_FILE_SIZE (UINT64)0xa0000000 /* 2684354560 bytes */
 
 #define PAGE_SIZE 0x1000
-#define ADDR_4G 0x100000000ULL
-#define ADDR_16M 0x1000000ULL
-#define PAGES_16M 0x1000
 
 static VOID Halt()
 {
@@ -160,15 +157,15 @@ static VOID DumpOneEntry (EFI_HANDLE ImageHandle, UINTN I)
 	EFI_FILE_PROTOCOL *File = NULL;
 	UINT64 CurrentFileSize = 0;
 
-	GetFileName(FileName, Mmap[I].PhysicalStart * PAGE_SIZE);
+	GetFileName(FileName, Mmap[I].PhysicalStart);
 	CreateResultFile(ImageHandle, &File, FileName);
 
-	for (UINTN P = 0; P < Mmap[I].NumberOfPages; P++) {
+	for (UINT64 P = 0; P < Mmap[I].NumberOfPages; P++) {
 		UINT64 *Ptr = (UINT64 *)(Mmap[I].PhysicalStart + P * PAGE_SIZE);
-		for (UINTN Q = 0; Q < PAGE_SIZE/sizeof(UINT64); Q++) {
+		for (UINT64 Q = 0; Q < PAGE_SIZE/sizeof(UINT8)-1; Q++) {
 			if (CurrentFileSize >= MAX_FILE_SIZE){
 				FinalizeResults(File);
-				GetFileName(FileName, Mmap[I].PhysicalStart + P * PAGE_SIZE);
+				GetFileName(FileName, (UINT64)Ptr);
 				CreateResultFile(ImageHandle, &File, FileName);
 				CurrentFileSize = 0;
 			}
@@ -216,11 +213,6 @@ efi_main (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 
 	Assert (Status == EFI_SUCCESS);
 	Print(L"\nMemory dump done\n");
-
-	/* Parse memmap again to see if it has changed. */
-	MmapEntries = 0;
-	TotalPages = 0;
-	InitMemmap();
 
 	Print(L"\nPress %HR%N to reboot, %HS%N to shut down\n");
 	WaitForSingleEvent(ST->ConIn->WaitForKey, 0);
