@@ -248,7 +248,7 @@ static VOID WriteOneEntry (UINTN I)
 	}
 }
 
-static VOID ExcludeRange (UINTN I, UINT64 Base, UINT64 NumPages)
+static UINTN ExcludeRange (UINTN I, UINT64 Base, UINT64 NumPages)
 {
 	Print(L"\nExcluding range @ %llx, %llx pages\n", Base, NumPages);
 	/*
@@ -292,15 +292,21 @@ static VOID ExcludeRange (UINTN I, UINT64 Base, UINT64 NumPages)
 		CopyMem (OrigEntry, OrigEntry + 1,
 		         (MmapEntries - I - 1) * sizeof(EFI_MEMORY_DESCRIPTOR));
 		MmapEntries--;
+
+		return 3;
 	} else if (Base + NumPages * PAGE_SIZE ==
 	           OrigEntry->PhysicalStart + OrigEntry->NumberOfPages * PAGE_SIZE) {
 		/* Case 1. */
 		OrigEntry->NumberOfPages -= NumPages;
+
+		return 1;
 	} else if (Base == OrigEntry->PhysicalStart &&
 	           NumPages != OrigEntry->NumberOfPages) {
 		/* Case 2. */
 		OrigEntry->NumberOfPages -= NumPages;
 		OrigEntry->PhysicalStart += NumPages * PAGE_SIZE;
+
+		return 2;
 	} else {
 		/* Case 4. */
 		Assert (MmapEntries < MEMORY_DESC_MAX);
@@ -326,10 +332,12 @@ static VOID ExcludeRange (UINTN I, UINT64 Base, UINT64 NumPages)
 		/* Insert new entries and update number of entries. */
 		CopyMem (OrigEntry, NewEntries, sizeof(NewEntries));
 		MmapEntries++;
+
+		return 4;
 	}
 }
 
-static VOID ExcludeOneEntry (UINTN I)
+static UINTN ExcludeOneEntry (UINTN I)
 {
 	BOOLEAN WasSame = TRUE;
 	UINT64 First = (UINT64)-1, Last = 0;
@@ -355,7 +363,17 @@ static VOID ExcludeOneEntry (UINTN I)
 					Last = (UINT64)Ptr + PAGE_SIZE - 1;
 					Last &= ~(UINT64)(PAGE_SIZE - 1);
 
-					ExcludeRange (I, First, (Last - First) / PAGE_SIZE);
+					UINTN Ret = ExcludeRange (I, First, (Last - First) / PAGE_SIZE);
+					if (Ret == 2){
+						First = (UINT64)-1;
+						Last = 0;
+						WasSame = TRUE;
+						P = (UINT64)-1;
+						break;
+					}
+					else if (Ret == 4)
+						return 4;
+
 					First = (UINT64)-1;
 					Last = 0;
 				}
@@ -367,8 +385,10 @@ static VOID ExcludeOneEntry (UINTN I)
 		ShowProgress();
 	}
 	if (First != (UINT64)-1) {
-		ExcludeRange (I, First, ((UINT64)Ptr - First) / PAGE_SIZE);
+		return ExcludeRange (I, First, ((UINT64)Ptr - First) / PAGE_SIZE);
 	}
+
+	return 0;
 }
 
 static UINT64 Differences = 0;
@@ -702,9 +722,11 @@ efi_main (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 		Print(L"\nPattern write done\n");
 	} else if (Key.UnicodeChar == L'2') {
 		Print(L"Exclude modified by firmware was selected\n");
-		for (UINTN I = 0; I < MmapEntries; I++) {
-			ExcludeOneEntry(I);
-		}
+		UINTN I = 0;
+
+		while (I < MmapEntries)
+			if (ExcludeOneEntry(I) == 0)
+				I++;
 
 		VarSize = MmapEntries * sizeof(EFI_MEMORY_DESCRIPTOR);
 		Status = uefi_call_wrapper(gRT->SetVariable, 5, VarName, &VarGuid,
