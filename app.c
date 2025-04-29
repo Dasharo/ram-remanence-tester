@@ -293,16 +293,20 @@ static UINTN ExcludeRange (UINTN I, UINT64 Base, UINT64 NumPages)
 		         (MmapEntries - I - 1) * sizeof(EFI_MEMORY_DESCRIPTOR));
 		MmapEntries--;
 
-		return 1;
+		return 3;
 	} else if (Base + NumPages * PAGE_SIZE ==
 	           OrigEntry->PhysicalStart + OrigEntry->NumberOfPages * PAGE_SIZE) {
 		/* Case 1. */
 		OrigEntry->NumberOfPages -= NumPages;
+
+		return 1;
 	} else if (Base == OrigEntry->PhysicalStart &&
 	           NumPages != OrigEntry->NumberOfPages) {
 		/* Case 2. */
 		OrigEntry->NumberOfPages -= NumPages;
 		OrigEntry->PhysicalStart += NumPages * PAGE_SIZE;
+
+		return 2;
 	} else {
 		/* Case 4. */
 		Assert (MmapEntries < MEMORY_DESC_MAX);
@@ -328,9 +332,9 @@ static UINTN ExcludeRange (UINTN I, UINT64 Base, UINT64 NumPages)
 		/* Insert new entries and update number of entries. */
 		CopyMem (OrigEntry, NewEntries, sizeof(NewEntries));
 		MmapEntries++;
-	}
 
-	return 0;
+		return 4;
+	}
 }
 
 static UINTN ExcludeOneEntry (UINTN I)
@@ -359,7 +363,15 @@ static UINTN ExcludeOneEntry (UINTN I)
 					Last = (UINT64)Ptr + PAGE_SIZE - 1;
 					Last &= ~(UINT64)(PAGE_SIZE - 1);
 
-					ExcludeRange (I, First, (Last - First) / PAGE_SIZE);
+					UINTN Ret = ExcludeRange (I, First, (Last - First) / PAGE_SIZE);
+					if (Ret == 2){
+						First = (UINT64)-1;
+						Last = 0;
+						WasSame = TRUE;
+						P = (UINT64)-1;
+						break;
+					}
+
 					First = (UINT64)-1;
 					Last = 0;
 				}
