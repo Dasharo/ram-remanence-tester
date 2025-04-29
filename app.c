@@ -371,6 +371,8 @@ static UINTN ExcludeOneEntry (UINTN I)
 						P = (UINT64)-1;
 						break;
 					}
+					else if (Ret == 4)
+						return 4;
 
 					First = (UINT64)-1;
 					Last = 0;
